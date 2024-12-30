@@ -219,10 +219,11 @@ def write_event_data(
             fallback_concept_id = pl.lit(table_details.get("fallback_concept_id", None), dtype=pl.Int64)
 
             # Note: we currently use the converted concepts as we want to increase cross-dataset compatibility
+            # In this branch we do not
             concept_id = (
                 pl.when(source_concept_id != 0)
                 .then(source_concept_id)
-                pl.when(concept_id != 0)
+                .when(concept_id != 0)
                 .then(concept_id)
                 .otherwise(fallback_concept_id)
             )
