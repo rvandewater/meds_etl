@@ -197,6 +197,17 @@ def write_event_data(
             assert len(options) > 0, f"Could not find the time column {schema.names()}"
             time = pl.coalesce(options)
 
+        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+        # Determine the metadata columns                            #
+        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
+
+        # Every key in the `metadata` dictionary will become a distinct
+        # column in the MEDS file; for each event, the metadata column
+        # and its corresponding value for a given subject will be stored
+        # as event metadata in the MEDS representation
+        metadata = {
+            "table": pl.lit(table_name, dtype=str),
+        }
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
         # Determine what to use for the `code` column                   #
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -210,6 +221,7 @@ def write_event_data(
             # Try using the source concept ID, but if it's not available then use the concept ID
             concept_id_field = table_details.get("concept_id_field", table_name + "_concept_id")
             concept_id = pl.col(concept_id_field).cast(pl.Int64)
+
             if concept_id_field.replace("_concept_id", "_source_concept_id") in schema.names():
                 source_concept_id = pl.col(concept_id_field.replace("_concept_id", "_source_concept_id")).cast(pl.Int64)
             else:
@@ -217,7 +229,9 @@ def write_event_data(
 
             # And if the source concept ID and concept ID aren't available, use `fallback_concept_id`
             fallback_concept_id = pl.lit(table_details.get("fallback_concept_id", None), dtype=pl.Int64)
+            print(f"source_concept_id: {source_concept_id}, concept_id: {concept_id}, fallback_concept_id: {fallback_concept_id}")
 
+            # .info(f"source_concept_id: {source_concept_id}, concept_id: {concept_id}, fallback_concept_id: {fallback_concept_id}")
             # Note: we currently use the converted concepts as we want to increase cross-dataset compatibility
             concept_id = (
                 pl.when(concept_id != 0)
@@ -226,10 +240,10 @@ def write_event_data(
                 .then(source_concept_id)
                 .otherwise(fallback_concept_id)
             )
-
             # Replace values in `concept_id` with the normalized concepts to which they are mapped
             # based on the `concept_id_map`
             code = concept_id.replace_strict(concept_id_map, return_dtype=pl.Utf8(), default=None)
+            metadata["source_concept_id"] = source_concept_id
 
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
         # Determine what to use for the `value`                       #
@@ -273,21 +287,10 @@ def write_event_data(
 
             value = pl.coalesce(value, backup_value)
 
-        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-        # Determine the metadata columns                            #
-        # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
-        # Every key in the `metadata` dictionary will become a distinct
-        # column in the MEDS file; for each event, the metadata column
-        # and its corresponding value for a given subject will be stored
-        # as event metadata in the MEDS representation
-        metadata = {
-            "table": pl.lit(table_name, dtype=str),
-        }
 
         if "visit_occurrence_id" in schema.names():
             metadata["visit_id"] = pl.col("visit_occurrence_id").cast(pl.Int64)
-
         unit_columns = []
         if "unit_source_value" in schema.names():
             unit_columns.append(pl.col("unit_source_value"))
@@ -328,7 +331,8 @@ def write_event_data(
         # Write this part of the MEDS Unsorted file to disk
         fname = os.path.join(path_to_MEDS_unsorted_dir, f'{table_name.replace("/", "_")}_{uuid.uuid4()}.parquet')
         try:
-            event_data.collect().write_parquet(fname, compression="zstd", compression_level=1)
+            tab = event_data.collect()
+            tab.write_parquet(fname, compression="zstd", compression_level=1)
         except pl.exceptions.InvalidOperationError as e:
             print(table_name)
             print(e)
@@ -649,7 +653,7 @@ def main():
         pq.write_table(table, os.path.join(path_to_temp_dir, "metadata", "codes.parquet"))
         # And we save another copy in the final/target MEDS directory
         shutil.copytree(
-            os.path.join(path_to_temp_dir, "metadata"), os.path.join(args.path_to_dest_meds_dir, "metadata")
+            os.path.join(path_to_temp_dir, "metadata"), os.path.join(args.path_to_dest_meds_dir, "metadata"), dirs_exist_ok=True
         )
 
         # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #

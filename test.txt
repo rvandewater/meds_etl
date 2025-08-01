@@ -1,0 +1,1 @@
+meds_etl_omop "/Users/robin/Documents/datasets/mimic-iv-demo-data-in-the-omop-common-data-model-0.9/1_omop_data_csv" "/Users/robin/Documents/datasets/mimic-iv-demo-data-in-the-omop-common-data-model-0.9/meds_etl_output"
