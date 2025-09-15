@@ -30,7 +30,7 @@ CUSTOMER_CONCEPT_ID_START: int = 2_000_000_000
 DEFAULT_VISIT_CONCEPT_ID: int = 8
 DEFAULT_NOTE_CONCEPT_ID: int = 46235038
 DEFAULT_VISIT_DETAIL_CONCEPT_ID: int = 4203722
-
+USE_MAPPED_CONCEPTS_FIRST = False
 OMOP_TIME_FORMATS: Iterable[str] = ("%Y-%m-%d %H:%M:%S%.f", "%Y-%m-%d")
 
 
@@ -219,14 +219,22 @@ def write_event_data(
 
             # And if the source concept ID and concept ID aren't available, use `fallback_concept_id`
             fallback_concept_id = pl.lit(table_details.get("fallback_concept_id", None), dtype=pl.Int64)
-
-            concept_id = (
-                pl.when(source_concept_id != 0)
-                .then(source_concept_id)
-                .when(concept_id != 0)
-                .then(concept_id)
-                .otherwise(fallback_concept_id)
-            )
+            if USE_MAPPED_CONCEPTS_FIRST:
+                concept_id = (
+                    pl.when(concept_id != 0)
+                    .then(concept_id)
+                    .when(source_concept_id != 0)
+                    .then(source_concept_id)
+                    .otherwise(fallback_concept_id)
+                )
+            else:
+                concept_id = (
+                    pl.when(source_concept_id != 0)
+                    .then(source_concept_id)
+                    .when(concept_id != 0)
+                    .then(concept_id)
+                    .otherwise(fallback_concept_id)
+                )
 
             # Replace values in `concept_id` with the normalized concepts to which they are mapped
             # based on the `concept_id_map`
@@ -259,7 +267,6 @@ def write_event_data(
             # 2. The ETL has decided to put non-maps to value codes in observation for various reasons.
             #      For instance STARR-OMOP puts shc_medical_hx in here
             #      In this case, we generally want to create a string value with the source code value.
-
             backup_value = (
                 pl.when((source_concept_id == 0) & (concept_id_value != 0))
                 .then(
@@ -593,6 +600,8 @@ def main():
         help="If set, the job continues from a previous run, starting after the "
         "conversion to MEDS Unsorted but before converting from MEDS Unsorted to MEDS.",
     )
+    parser.add_argument("--use_standardized_concepts", action="store_true",
+                        help="If set, standardized concepts will be used first instead of source concepts from the OMOP tables.")
     parser.add_argument("--force_refresh", action="store_true", help="If set, this will overwrite all previous MEDS data in the output dir.")
     parser.add_argument("--omop_version", type=str, help="Switch between OMOP 5.3/5.4, default 5.4.")
     args = parser.parse_args()
@@ -607,7 +616,10 @@ def main():
                 print(f"Deleting and recreating {args.path_to_dest_meds_dir}")
             shutil.rmtree(args.path_to_dest_meds_dir)
     os.makedirs(args.path_to_dest_meds_dir, exist_ok=True)
-
+    if args.use_standardized_concepts:
+        global USE_MAPPED_CONCEPTS_FIRST
+        USE_MAPPED_CONCEPTS_FIRST = True
+        print("Using standardized concepts first when mapping from OMOP to MEDS")
     if not args.omop_version:
         omop_version = "5.4"
     else:
